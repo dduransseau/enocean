@@ -1,10 +1,9 @@
 # -*- encoding: utf-8 -*-
 from __future__ import print_function, unicode_literals, division, absolute_import
-import os
 import logging
-from sys import version_info
+from pathlib import Path
 from collections import OrderedDict
-from bs4 import BeautifulSoup
+from xml.etree import ElementTree
 
 import enocean.utils
 # Left as a helper
@@ -18,16 +17,12 @@ class EEP(object):
         self.init_ok = False
         self.telegrams = {}
 
-        eep_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'EEP.xml')
+        eep_path = Path(__file__).parent.absolute().joinpath('EEP.xml')
         try:
-            if version_info[0] > 2:
-                with open(eep_path, 'r', encoding='UTF-8') as xml_file:
-                    self.soup = BeautifulSoup(xml_file.read(), "html.parser")
-            else:
-                with open(eep_path, 'r') as xml_file:
-                    self.soup = BeautifulSoup(xml_file.read(), "html.parser")
-            self.init_ok = True
+            with open(eep_path, 'r', encoding="utf-8") as xml_file:
+                self.soup = ElementTree.fromstring(xml_file.read())
             self.__load_xml()
+            self.init_ok = True
         except IOError:
             # Impossible to test with the current structure?
             # To be honest, as the XML is included with the library,
@@ -37,14 +32,14 @@ class EEP(object):
 
     def __load_xml(self):
         self.telegrams = {
-            enocean.utils.from_hex_string(telegram['rorg']): {
-                enocean.utils.from_hex_string(function['func']): {
-                    enocean.utils.from_hex_string(type['type'], ): type
-                    for type in function.find_all('profile')
+            enocean.utils.from_hex_string(telegram.attrib['rorg']): {
+                enocean.utils.from_hex_string(function.attrib['func']): {
+                    enocean.utils.from_hex_string(type.attrib['type'], ): type
+                    for type in function.findall('profile')
                 }
-                for function in telegram.find_all('profiles')
+                for function in telegram.findall('profiles')
             }
-            for telegram in self.soup.find_all('telegram')
+            for telegram in self.soup.findall('telegram')
         }
 
     @staticmethod
@@ -157,22 +152,14 @@ class EEP(object):
     def find_profile(self, bitarray, eep_rorg, rorg_func, rorg_type, direction=None, command=None):
         ''' Find profile and data description, matching RORG, FUNC and TYPE '''
         if not self.init_ok:
-            self.logger.warn('EEP.xml not loaded!')
+            self.logger.warning('EEP.xml not loaded!')
             return None
-
-        if eep_rorg not in self.telegrams.keys():
-            self.logger.warn('Cannot find rorg %s in EEP!', hex(eep_rorg))
+        try:
+            profile = self.telegrams[eep_rorg][rorg_func][rorg_type]
+        except Exception as e:
+            self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
+                             hex(rorg_type))
             return None
-
-        if rorg_func not in self.telegrams[eep_rorg].keys():
-            self.logger.warn('Cannot find rorg %s func %s in EEP!', hex(eep_rorg), hex(rorg_func))
-            return None
-
-        if rorg_type not in self.telegrams[eep_rorg][rorg_func].keys():
-            self.logger.warn('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func), hex(rorg_type))
-            return None
-
-        profile = self.telegrams[eep_rorg][rorg_func][rorg_type]
 
         if command:
             # multiple commands can be defined, with the command id always in same location (per RORG-FUNC-TYPE).
@@ -196,6 +183,7 @@ class EEP(object):
         if not self.init_ok or profile is None:
             return [], {}
 
+        # TODO: I guess this is now useless since Python 3.7
         output = OrderedDict({})
         for source in profile.contents:
             if not source.name:
