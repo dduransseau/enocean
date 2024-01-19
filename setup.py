@@ -23,7 +23,5 @@ setup(
         '': ['EEP.xml']
     },
     install_requires=[
-        'enum-compat>=0.0.2',
-        'pyserial>=3.0',
-        'beautifulsoup4>=4.3.2',
+        'pyserial>=3.0'
     ])

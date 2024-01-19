@@ -9,6 +9,215 @@ import enocean.utils
 # Left as a helper
 from enocean.protocol.constants import RORG  # noqa: F401
 
+class BaseDataElt:
+    " Base class inherit from every value data telegram"
+    def __init__(self, elt):
+        self.description = elt.get("description")
+        self.shortcut = elt.get("shortcut")
+        self.offset = int(elt.get("offset")) if elt.get("offset") else None
+        self.size = int(elt.get("size")) if elt.get("size") else None
+
+class DataStatus(BaseDataElt):
+    """ Status element
+    ex: <status description="T21" shortcut="T21" offset="2" size="1" />
+    """
+
+    def __str__(self) -> str:
+        return f"Data status for {self.description}"
+
+class DataValue(BaseDataElt):
+    """
+    ex: <value description="Temperature (linear)" shortcut="TMP" offset="16" size="8" unit="°C">
+            <range>
+              <min>255</min>
+              <max>0</max>
+            </range>
+            <scale>
+              <min>-40.000000</min>
+              <max>0.000000</max>
+            </scale>
+          </value>
+    """
+    def __init__(self, elt):
+        super().__init__(elt)
+        self.unit = elt.get("unit")
+        if r := elt.get("range"):
+            self.is_range = True
+            self.start = float(r.get("start"))
+            self.end = float(r.get("end"))
+        if s := elt.get("scale"):
+            self.scale = True
+            self.scale_min = float(s.get("min"))
+            self.scale_max = float(s.get("max"))
+
+    def __str__(self) -> str:
+        return f"Data value for {self.description}"
+
+
+class DataEnumItem(BaseDataElt):
+
+    def __init__(self, elt):
+        super().__init__(elt)
+        self.value = int(elt.get("value"))
+
+
+class DataEnumRangeItem(BaseDataElt):
+
+    def __init__(self, elt, *args, **kwargs):
+        super().__init__(elt)
+        self.start = int(elt.get("start"))
+        self.end = int(elt.get("end"))
+
+    @property
+    def limit(self):
+        return (self.start, self.end,)
+
+    def is_in(self, value):
+        if self.start <= value <= self.end:
+            return True
+
+    def range(self):
+        return range(self.start, self.end+1)
+
+    def __eq__(self, __value: object) -> bool:
+        return super().__eq__(__value)
+
+class DataEnum(BaseDataElt):
+    """ Base class used for Enum and EnumRange"""
+
+    def __init__(self, elt):
+        super().__init__(elt)
+        self.items = dict()
+        self.range_items = list()
+        for item in elt.findall("item"):
+            i = DataEnumItem(item)
+            self.items[i.value] = i
+        for ritem in elt.findall("rangeitem"):
+            r = DataEnumRangeItem(ritem)
+            self.range_items.append(r)
+
+    @property
+    def first(self):
+        # Find the first valid value of enum
+        min = 256
+        for i in self.items.keys():
+            if i < min:
+                min = i
+        for i in self.range_items:
+            if i.start < min:
+                min = i.start
+        return min
+
+    @property
+    def last(self):
+        # find the last valid value of enum
+        max = 0
+        for i in self.items.values():
+            if i.value > max:
+                max = i.value
+        for i in self.range_items:
+            if i.end > max:
+                max = i.end
+        return max
+
+    def get(self, val):
+        if item := self.items.get(val):
+            return item
+        for r in self.range_items:
+            if r.is_in(val):
+                return r
+
+    def __str__(self) -> str:
+        return f"Data enum for {self.description} from {self.first} to {self.last}"
+
+    def __len__(self):
+        return len(self.items) + len(self.range_items)
+
+
+
+class ProfileCommand(DataEnum):
+    """ Used to define available commands"""
+
+
+class ProfileData:
+    """"""
+    def __init__(self, elt):
+        self.command = int(elt.get("command")) if elt.get("command") else None
+        self.direction = int(elt.get("direction")) if elt.get("direction") else None
+        self.items = list()
+
+        for e in elt.iter():
+            if e.tag == "status":
+                self.items.append(DataStatus(e))
+            elif e.tag == "value":
+                self.items.append(DataValue(e))
+            elif e.tag == "enum":
+                self.items.append(DataEnum(e))
+
+    def __str__(self):
+        return f"Profile data command {self.command} and direction {self.direction} with {len(self.items)} items"
+
+class Profile:
+
+    def __init__(self, elt, rorg=None, func=None):
+        self.rorg = rorg
+        self.func = func
+        self.type = elt.get("type")
+        self.description = elt.get("description")
+        if len(elt.findall("command")) > 1:
+            raise ValueError("More then 1 command for profile")
+        c = elt.find("command")
+        if c is not None:
+            self.commands = ProfileCommand(c)
+            if len(self.commands) > len(elt.findall("data")):
+                Warning(f"{self.rorg}-{self.func}-{self.type} Seems to have less command than possible value"
+                        f" commands: {len(self.commands)} data {len(elt.findall("data"))}")
+        else:
+            self.commands = None
+        self.datas = dict()
+        for p in elt.findall("data"):
+            profile_data = ProfileData(p)
+            self.datas[profile_data.command] = profile_data
+        # self.datas = [ProfileData(p) for p in elt.findall("data")]
+
+    @property
+    def code(self):
+        return f"{self.rorg}-{self.func}-{self.type}"
+
+    def __str__(self):
+        txt = f"Profile {self.code} about {self.description}"
+        if self.commands:
+            txt += f" with {len(self.commands)} commands"
+        return txt
+
+    def get(self, command=None, direction=None):
+        if command and not self.commands:
+            raise ValueError("A command is specified but not supported by profile")
+        elif self.commands and not command:
+            raise ValueError("Command not specified but profile support multiple commands")
+        elif command:
+            return self.datas.get(command)
+
+        if direction:
+            datas = [x for x in self.datas.values() if x.direction == direction]
+            if len(datas) > 1:
+                raise ValueError("Multiple data match a direction")
+            else:
+                return datas[0]
+        return self.datas.get(None)
+            # for data in self.datas:
+            #     if command == data.command: # TODO: Check if data format is coherent
+            #         return data
+
+
+class Profiles:
+
+    def __init__(self, elt):
+        self.func = elt.get("func")
+        self.description = elt.get("description")
+        self.profiles = [Profile(p) for p in elt.findall("profile")]
+
+
 
 class EEP(object):
     logger = logging.getLogger('enocean.protocol.eep')
@@ -36,6 +245,16 @@ class EEP(object):
                 enocean.utils.from_hex_string(function.attrib['func']): {
                     enocean.utils.from_hex_string(type.attrib['type'], ): type
                     for type in function.findall('profile')
+                }
+                for function in telegram.findall('profiles')
+            }
+            for telegram in self.soup.findall('telegram')
+        }
+        self.telegrams2 = {
+            enocean.utils.from_hex_string(telegram.attrib['rorg']): {
+                enocean.utils.from_hex_string(function.attrib['func']): {
+                    enocean.utils.from_hex_string(profile.attrib['type'], ): Profile(profile, telegram.attrib['rorg'], function.attrib['func'])
+                    for profile in function.findall('profile')
                 }
                 for function in telegram.findall('profiles')
             }
@@ -80,7 +299,7 @@ class EEP(object):
             source['shortcut']: {
                 'description': source.get('description'),
                 'unit': source['unit'],
-                'value': (scl_max - scl_min) / (rng_max - rng_min) * (raw_value - rng_min) + scl_min,
+                'value': (scl_max - scl_min) / (rng_max - rng_min) * (raw_value - rng_min) + scl_min, # TODO: Figure out this logic
                 'raw_value': raw_value,
             }
         }
@@ -177,6 +396,19 @@ class EEP(object):
         if direction is None:
             return profile.find('data', recursive=False)
         return profile.find('data', {'direction': direction}, recursive=False)
+
+    def find_profile2(self, bitarray, eep_rorg, rorg_func, rorg_type, direction=None, command=None):
+        ''' Find profile and data description, matching RORG, FUNC and TYPE '''
+        if not self.init_ok:
+            self.logger.warning('EEP.xml not loaded!')
+            return None
+        try:
+            profile = self.telegrams[eep_rorg][rorg_func][rorg_type]
+        except Exception as e:
+            self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
+                                hex(rorg_type))
+            return None
+        return profile.get(direction=None, command=None)
 
     def get_values(self, profile, bitarray, status):
         ''' Get keys and values from bitarray '''
