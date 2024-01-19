@@ -16,6 +16,12 @@ class BaseDataElt:
         self.shortcut = elt.get("shortcut")
         self.offset = int(elt.get("offset")) if elt.get("offset") else None
         self.size = int(elt.get("size")) if elt.get("size") else None
+        self.unit = elt.get("unit") if elt.get("unit") else ""
+
+    def parse_raw(self, bitarray):
+        ''' Get raw data as integer, based on offset and size '''
+        return int(''.join(['1' if digit else '0' for digit in bitarray[self.offset:self.offset + self.size]]), 2)
+
 
 class DataStatus(BaseDataElt):
     """ Status element
@@ -24,6 +30,18 @@ class DataStatus(BaseDataElt):
 
     def __str__(self) -> str:
         return f"Data status for {self.description}"
+
+    def parse(self, bitarray, status):
+        ''' Get boolean value, based on the data in XML '''
+        raw_value = self.parse_raw(status)
+        return {
+            self.shortcut: {
+                'description': self.description,
+                'unit': self.unit,
+                'value': True if raw_value else False,
+                'raw_value': raw_value,
+            }
+        }
 
 class DataValue(BaseDataElt):
     """
@@ -40,15 +58,30 @@ class DataValue(BaseDataElt):
     """
     def __init__(self, elt):
         super().__init__(elt)
-        self.unit = elt.get("unit")
-        if r := elt.get("range"):
+        if r := elt.find("range"):
             self.is_range = True
-            self.start = float(r.get("start"))
-            self.end = float(r.get("end"))
-        if s := elt.get("scale"):
+            self.range_min = float(r.find("min").text)
+            self.range_max = float(r.find("max").text)
+        if s := elt.find("scale"):
             self.scale = True
-            self.scale_min = float(s.get("min"))
-            self.scale_max = float(s.get("max"))
+            self.scale_min = float(s.find("min").text)
+            self.scale_max = float(s.find("max").text)
+
+    def process_value(self, val):
+        return (self.scale_max - self.scale_min) / (self.range_max - self.range_min) * (val - self.range_min) + self.scale_min
+    def parse(self, bitarray, status):
+        raw = self.parse_raw(bitarray)
+        # print(f"Data raw {raw}")
+        return {
+            self.shortcut: {
+                'description': self.description,
+                'unit': self.unit,
+                # TODO: Figure out this logic
+                'value': (self.scale_max - self.scale_min) / (self.range_max - self.range_min)
+                         * (raw - self.range_min) + self.scale_min,
+                'raw_value': raw,
+            }
+        }
 
     def __str__(self) -> str:
         return f"Data value for {self.description}"
@@ -81,6 +114,7 @@ class DataEnumRangeItem(BaseDataElt):
 
     def __eq__(self, __value: object) -> bool:
         return super().__eq__(__value)
+
 
 class DataEnum(BaseDataElt):
     """ Base class used for Enum and EnumRange"""
@@ -127,12 +161,26 @@ class DataEnum(BaseDataElt):
             if r.is_in(val):
                 return r
 
+    def parse(self, bitarray, status):
+        raw = self.parse_raw(bitarray)
+
+        # Find value description.
+        item = self.get(int(raw))
+
+        return {
+            self.shortcut: {
+                'description': self.description,
+                'unit': self.unit,
+                'value': item.description,
+                'raw_value': raw,
+            }
+        }
+
     def __str__(self) -> str:
         return f"Data enum for {self.description} from {self.first} to {self.last}"
 
     def __len__(self):
         return len(self.items) + len(self.range_items)
-
 
 
 class ProfileCommand(DataEnum):
@@ -177,7 +225,8 @@ class Profile:
         self.datas = dict()
         for p in elt.findall("data"):
             profile_data = ProfileData(p)
-            self.datas[profile_data.command] = profile_data
+            profile_key = (profile_data.command, profile_data.direction)
+            self.datas[profile_key] = profile_data
         # self.datas = [ProfileData(p) for p in elt.findall("data")]
 
     @property
@@ -191,23 +240,20 @@ class Profile:
         return txt
 
     def get(self, command=None, direction=None):
+        # TODO: Confirm this exception
+        if command and direction:
+            Warning("Command and Direction are specified but only one at a time can be use")
         if command and not self.commands:
             raise ValueError("A command is specified but not supported by profile")
         elif self.commands and not command:
             raise ValueError("Command not specified but profile support multiple commands")
-        elif command:
-            return self.datas.get(command)
-
-        if direction:
-            datas = [x for x in self.datas.values() if x.direction == direction]
-            if len(datas) > 1:
-                raise ValueError("Multiple data match a direction")
-            else:
-                return datas[0]
-        return self.datas.get(None)
-            # for data in self.datas:
-            #     if command == data.command: # TODO: Check if data format is coherent
-            #         return data
+        # elif command:
+        #     print("Command selected:", command, type(command))
+        #
+        # if direction:
+        #     print("Direction selected:", direction, type(direction))
+        #     print(self, self.datas)
+        return self.datas.get((command, direction))
 
 
 class Profiles:
@@ -216,7 +262,6 @@ class Profiles:
         self.func = elt.get("func")
         self.description = elt.get("description")
         self.profiles = [Profile(p) for p in elt.findall("profile")]
-
 
 
 class EEP(object):
@@ -262,75 +307,19 @@ class EEP(object):
         }
 
     @staticmethod
-    def _get_raw(source, bitarray):
-        ''' Get raw data as integer, based on offset and size '''
-        offset = int(source['offset'])
-        size = int(source['size'])
-        return int(''.join(['1' if digit else '0' for digit in bitarray[offset:offset + size]]), 2)
-
-    @staticmethod
     def _set_raw(target, raw_value, bitarray):
         ''' put value into bit array '''
-        offset = int(target['offset'])
-        size = int(target['size'])
+        offset = int(target.get('offset'))
+        size = int(target.get('size'))
         for digit in range(size):
             bitarray[offset+digit] = (raw_value >> (size-digit-1)) & 0x01 != 0
         return bitarray
 
     @staticmethod
     def _get_rangeitem(source, raw_value):
-        for rangeitem in source.find_all('rangeitem'):
+        for rangeitem in source.findall('rangeitem'):
             if raw_value in range(int(rangeitem.get('start', -1)), int(rangeitem.get('end', -1)) + 1):
                 return rangeitem
-
-    def _get_value(self, source, bitarray):
-        ''' Get value, based on the data in XML '''
-        raw_value = self._get_raw(source, bitarray)
-
-        rng = source.find('range')
-        rng_min = float(rng.find('min').text)
-        rng_max = float(rng.find('max').text)
-
-        scl = source.find('scale')
-        scl_min = float(scl.find('min').text)
-        scl_max = float(scl.find('max').text)
-
-        return {
-            source['shortcut']: {
-                'description': source.get('description'),
-                'unit': source['unit'],
-                'value': (scl_max - scl_min) / (rng_max - rng_min) * (raw_value - rng_min) + scl_min, # TODO: Figure out this logic
-                'raw_value': raw_value,
-            }
-        }
-
-    def _get_enum(self, source, bitarray):
-        ''' Get enum value, based on the data in XML '''
-        raw_value = self._get_raw(source, bitarray)
-
-        # Find value description.
-        value_desc = source.find('item', {'value': str(raw_value)}) or self._get_rangeitem(source, raw_value)
-
-        return {
-            source['shortcut']: {
-                'description': source.get('description'),
-                'unit': source.get('unit', ''),
-                'value': value_desc['description'].format(value=raw_value),
-                'raw_value': raw_value,
-            }
-        }
-
-    def _get_boolean(self, source, bitarray):
-        ''' Get boolean value, based on the data in XML '''
-        raw_value = self._get_raw(source, bitarray)
-        return {
-            source['shortcut']: {
-                'description': source.get('description'),
-                'unit': source.get('unit', ''),
-                'value': True if raw_value else False,
-                'raw_value': raw_value,
-            }
-        }
 
     def _set_value(self, target, value, bitarray):
         ''' set given numeric value to target field in bitarray '''
@@ -374,58 +363,20 @@ class EEP(object):
             self.logger.warning('EEP.xml not loaded!')
             return None
         try:
-            profile = self.telegrams[eep_rorg][rorg_func][rorg_type]
-        except Exception as e:
-            self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
-                             hex(rorg_type))
-            return None
-
-        if command:
-            # multiple commands can be defined, with the command id always in same location (per RORG-FUNC-TYPE).
-            eep_command = profile.find('command', recursive=False)
-            # If commands are not set in EEP, or command is None,
-            # get the first data as a "best guess".
-            if not eep_command:
-                return profile.find('data', recursive=False)
-
-            # If eep_command is defined, so should be data.command
-            return profile.find('data', {'command': str(command)}, recursive=False)
-
-        # extract data description
-        # the direction tag is optional
-        if direction is None:
-            return profile.find('data', recursive=False)
-        return profile.find('data', {'direction': direction}, recursive=False)
-
-    def find_profile2(self, bitarray, eep_rorg, rorg_func, rorg_type, direction=None, command=None):
-        ''' Find profile and data description, matching RORG, FUNC and TYPE '''
-        if not self.init_ok:
-            self.logger.warning('EEP.xml not loaded!')
-            return None
-        try:
-            profile = self.telegrams[eep_rorg][rorg_func][rorg_type]
+            profile = self.telegrams2[eep_rorg][rorg_func][rorg_type]
         except Exception as e:
             self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
                                 hex(rorg_type))
             return None
-        return profile.get(direction=None, command=None)
+        return profile.get(direction=direction, command=command)
 
     def get_values(self, profile, bitarray, status):
         ''' Get keys and values from bitarray '''
         if not self.init_ok or profile is None:
             return [], {}
-
-        # TODO: I guess this is now useless since Python 3.7
-        output = OrderedDict({})
-        for source in profile.contents:
-            if not source.name:
-                continue
-            if source.name == 'value':
-                output.update(self._get_value(source, bitarray))
-            if source.name == 'enum':
-                output.update(self._get_enum(source, bitarray))
-            if source.name == 'status':
-                output.update(self._get_boolean(source, status))
+        output = dict()
+        for source in profile.items:
+            output.update(source.parse(bitarray, status))
         return output.keys(), output
 
     def set_values(self, profile, data, status, properties):
