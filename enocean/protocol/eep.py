@@ -320,11 +320,13 @@ class EEP(object):
         self.init_ok = False
         self.telegrams = {}
 
-        eep_path = Path(__file__).parent.absolute().joinpath('EEP.xml')
         try:
-            tree = ElementTree.parse(eep_path)
-            tree_root = tree.getroot()
-            self.__load_xml(tree_root)
+            # eep_path = Path(__file__).parent.absolute().joinpath('EEP.xml')
+            # tree = ElementTree.parse(eep_path)
+            # tree_root = tree.getroot()
+            # self.__load_xml(tree_root)
+            eep_path = Path(__file__).parent.absolute().joinpath('eep')
+            self.__load_xml_files(eep_path)
             self.init_ok = True
         except IOError:
             # Impossible to test with the current structure?
@@ -344,6 +346,33 @@ class EEP(object):
             }
             for telegram in et.findall('telegram')
         }
+
+    def __load_xml_files(self, folder_path):
+        """ Used for case of usage of xml profile file per profile"""
+        for file_path in folder_path.glob("**/*.xml"):
+            tree = ElementTree.parse(file_path)
+            tree_root = tree.getroot()
+            telegram = tree_root.find("telegram")
+            function = telegram.find("profiles")
+            profile = function.find("profile")
+
+            rorg = enocean.utils.from_hex_string(telegram.attrib['rorg'])
+            func = enocean.utils.from_hex_string(function.attrib['func'])
+            type_ = enocean.utils.from_hex_string(profile.attrib['type'])
+
+            if rorg in self.telegrams:
+                if func in self.telegrams[rorg]:
+                    if type_ in self.telegrams[rorg][func]:
+                        continue # Should not occur
+                    else:
+                        self.telegrams[rorg][func].update({type_: Profile(profile)})
+                else:
+                    self.telegrams[rorg].update({func : {type_ : Profile(profile)}})
+            else:
+                self.telegrams.update({rorg : {func : {type_ : Profile(profile)}}})
+
+
+
 
     def find_profile(self, bitarray, eep_rorg, rorg_func, rorg_type, direction=None, command=None):
         ''' Find profile and data description, matching RORG, FUNC and TYPE
