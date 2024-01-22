@@ -273,9 +273,9 @@ class Packet(object):
         if rorg_func is not None and rorg_type is not None:
             self.select_eep(rorg_func, rorg_type, direction, command)
         # parse data
-        provides, values = self.eep.get_values(self._profile, self._bit_data, self._bit_status)
+        values = self.eep.get_values(self._profile, self._bit_data, self._bit_status)
         self.parsed.update(values)
-        return list(provides)
+        return list(values)
 
     def set_eep(self, data):
         ''' Update packet data based on EEP. Input data is a dictionary with keys corresponding to the EEP. '''

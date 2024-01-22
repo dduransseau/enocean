@@ -10,9 +10,11 @@ from enocean.protocol.constants import RORG  # noqa: F401
 
 
 class BaseDataElt:
+
+    logger = logging.getLogger('enocean.protocol.eep.data')
     " Base class inherit from every value data telegram"
     def __init__(self, elt):
-        self.description = elt.get("description")
+        self.description = elt.get("description", "")
         self.shortcut = elt.get("shortcut")
         self.offset = int(elt.get("offset")) if elt.get("offset") else None
         self.size = int(elt.get("size")) if elt.get("size") else None
@@ -20,11 +22,16 @@ class BaseDataElt:
 
     def parse_raw(self, bitarray):
         ''' Get raw data as integer, based on offset and size '''
-        # TODO: That could be improved
-        return int(''.join(['1' if digit else '0' for digit in bitarray[self.offset:self.offset + self.size]]), 2)
+        # TODO: That could be improved and could be check since it raise error
+        self.logger.debug(f"Parse raw data: {bitarray}")
+        try:
+            return int(''.join(['1' if digit else '0' for digit in bitarray[self.offset:self.offset + self.size]]), 2)
+        except:
+            return 0
 
     def _set_raw(self, raw_value, bitarray):
         ''' put value into bit array '''
+        self.logger.debug(f"Set raw data: {raw_value}")
         for digit in range(self.size):
             bitarray[self.offset+digit] = (raw_value >> (self.size-digit-1)) & 0x01 != 0
         return bitarray
@@ -78,10 +85,14 @@ class DataValue(BaseDataElt):
             self.scale = True
             self.scale_min = float(s.find("min").text)
             self.scale_max = float(s.find("max").text)
+        try:
+            self.multiplier = (self.scale_max - self.scale_min) / (self.range_max - self.range_min)
+        except Exception as e:
+            self.multiplier = 1
 
     def process_value(self, val):
-        # TODO: Figure out this logic
-        return (self.scale_max - self.scale_min) / (self.range_max - self.range_min) * (val - self.range_min) + self.scale_min
+        # p8 EEP profile documentation
+        return self.multiplier * (val - self.range_min) + self.scale_min
 
     def parse(self, bitarray, status):
         raw = self.parse_raw(bitarray)
@@ -98,7 +109,9 @@ class DataValue(BaseDataElt):
     def set_value(self, data, bitarray):
         ''' set given numeric value to target field in bitarray '''
         # derive raw value
-        value = (data - self.scale_min) / (self.range_max - self.range_min) * (self.scale_max - self.scale_min) + self.range_min
+        # TODO : Confirm method
+        # value = (data - self.scale_min) / (self.range_max - self.range_min) * (self.scale_max - self.scale_min) + self.range_min
+        value = self.process_value(data)
         return self._set_raw(int(value), bitarray)
 
     def __str__(self) -> str:
@@ -192,12 +205,12 @@ class DataEnum(BaseDataElt):
 
         # Find value description
         item = self.get(int(raw))
-
+        self.logger.debug(f"Found item {item} for value {raw}")
         return {
             self.shortcut: {
                 'description': self.description,
                 'unit': self.unit,
-                'value': item.description,
+                'value': item.value if item else raw,
                 'raw_value': raw,
             }
         }
@@ -295,7 +308,8 @@ class Profile:
         elif self.commands and not command:
             # Do not raise Exception since it break tests, however this is an error anyway
             # raise ValueError("Command not specified but profile support multiple commands")
-            return None
+            # TODO: Confirm that first command shoudl be retrieve if not specified
+            return self.datas.get((1, direction))
         # elif command:
         #     print("Command selected:", command, type(command))
         #
@@ -321,12 +335,12 @@ class EEP(object):
         self.telegrams = {}
 
         try:
-            # eep_path = Path(__file__).parent.absolute().joinpath('EEP.xml')
-            # tree = ElementTree.parse(eep_path)
-            # tree_root = tree.getroot()
-            # self.__load_xml(tree_root)
-            eep_path = Path(__file__).parent.absolute().joinpath('eep')
-            self.__load_xml_files(eep_path)
+            eep_path = Path(__file__).parent.absolute().joinpath('EEP.xml')
+            tree = ElementTree.parse(eep_path)
+            tree_root = tree.getroot()
+            self.__load_xml(tree_root)
+            # eep_path = Path(__file__).parent.absolute().joinpath('eep')
+            # self.__load_xml_files(eep_path)
             self.init_ok = True
         except IOError:
             # Impossible to test with the current structure?
@@ -397,7 +411,7 @@ class EEP(object):
         output = dict()
         for source in profile.items:
             output.update(source.parse(bitarray, status))
-        return output.keys(), output
+        return output
 
     def set_values(self, profile, data, status, properties):
         ''' Update data based on data contained in properties
