@@ -74,7 +74,9 @@ class Packet(object):
     @_bit_data.setter
     def _bit_data(self, value):
         # The same as getting the data, first and last 5 bits are ommitted, as they are defined...
+        Packet.logger.debug(f"_bit_data byte value {value} in {self.data}")
         for byte in range(len(self.data) - 6):
+            Packet.logger.debug(f"_bit_data byte {byte} limite_start {byte * 8} limite_end {(byte + 1) * 8}")
             self.data[byte+1] = enocean.utils.from_bitarray(value[byte*8:(byte+1)*8])
 
     # # COMMENTED OUT, AS NOTHING TOUCHES _bit_optional FOR NOW.
@@ -220,9 +222,11 @@ class Packet(object):
         elif rorg == RORG.BS4:
             packet.data.extend([0, 0, 0, 0])
         else:
-            packet.data.extend([0] * int(packet._profile.get('bits', '1')))
+            Packet.logger.debug(f'Extend the size of packet by {packet._profile.bits} bits')
+            packet.data.extend([0] * int(packet._profile.bits))
         packet.data.extend(sender)
         packet.data.extend([0])
+        Packet.logger.debug(f'PAcket data length {len(packet.data)}')
         # Always use sub-telegram 3, maximum dbm (as per spec, when sending),
         # and no security (security not supported as per EnOcean Serial Protocol).
         packet.optional = [3] + destination + [0xFF] + [0]
@@ -238,7 +242,7 @@ class Packet(object):
             if rorg == RORG.BS4:
                 packet.data[4] |= (1 << 3)
         packet.data[-1] = packet.status
-
+        Packet.logger.debug(f'PAcket data length {len(packet.data)} after set_eep')
         # Parse the built packet, so it corresponds to the received packages
         # For example, stuff like RadioPacket.learn should be set.
         packet = Packet.parse_msg(packet.build())[2]
@@ -264,7 +268,9 @@ class Packet(object):
         # set EEP profile
         self.rorg_func = rorg_func
         self.rorg_type = rorg_type
+        self.logger.debug(f"Lookup profile {self.rorg}, {rorg_func}, {rorg_type}, direction={direction}, command={command}")
         self._profile = self.eep.find_profile(self._bit_data, self.rorg, rorg_func, rorg_type, direction, command)
+        self.logger.debug(f"Found profile {self._profile}")
         return self._profile is not None
 
     def parse_eep(self, rorg_func=None, rorg_type=None, direction=None, command=None):
@@ -274,11 +280,13 @@ class Packet(object):
             self.select_eep(rorg_func, rorg_type, direction, command)
         # parse data
         values = self.eep.get_values(self._profile, self._bit_data, self._bit_status)
+        self.logger.debug(f"Parsed data values {values}")
         self.parsed.update(values)
         return list(values)
 
     def set_eep(self, data):
         ''' Update packet data based on EEP. Input data is a dictionary with keys corresponding to the EEP. '''
+        self.logger.debug(f"Set eep {self._profile} {self._bit_data} {self._bit_status} {data}")
         self._bit_data, self._bit_status = self.eep.set_values(self._profile, self._bit_data, self._bit_status, data)
 
     def build(self):

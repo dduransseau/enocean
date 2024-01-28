@@ -1,6 +1,7 @@
 # -*- encoding: utf-8 -*-
 from __future__ import print_function, unicode_literals, division, absolute_import
 import logging
+import copy
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -23,17 +24,22 @@ class BaseDataElt:
     def parse_raw(self, bitarray):
         ''' Get raw data as integer, based on offset and size '''
         # TODO: That could be improved and could be check since it raise error
-        self.logger.debug(f"Parse raw data: {bitarray}")
+        # self.logger.debug(f"Parse raw data: {bitarray}")
+        result = 0
         try:
-            return int(''.join(['1' if digit else '0' for digit in bitarray[self.offset:self.offset + self.size]]), 2)
+            # return int(''.join(['1' if digit else '0' for digit in bitarray[self.offset:self.offset + self.size]]), 2)
+            for bit in bitarray[self.offset:self.offset + self.size]:
+                result = (result << 1) | bit
+            return result
         except:
             return 0
 
     def _set_raw(self, raw_value, bitarray):
         ''' put value into bit array '''
-        self.logger.debug(f"Set raw data: {raw_value}")
+        self.logger.debug(f"_set_raw from offset={self.offset} size={self.size} with value={raw_value}")
+        size = self.size
         for digit in range(self.size):
-            bitarray[self.offset+digit] = (raw_value >> (self.size-digit-1)) & 0x01 != 0
+            bitarray[self.offset+digit] = (raw_value >> (size-digit-1)) & 0x01 != 0
         return bitarray
 
 
@@ -124,10 +130,13 @@ class DataEnumItem(BaseDataElt):
         super().__init__(elt)
         self.value = int(elt.get("value"))
 
+    def __str__(self):
+        return f"Enum Item {self.description}"
+
 
 class DataEnumRangeItem(BaseDataElt):
 
-    def __init__(self, elt, *args, **kwargs):
+    def __init__(self, elt):
         super().__init__(elt)
         self.start = int(elt.get("start"))
         self.end = int(elt.get("end"))
@@ -145,6 +154,9 @@ class DataEnumRangeItem(BaseDataElt):
 
     def __eq__(self, __value: object) -> bool:
         return super().__eq__(__value)
+
+    def __str__(self):
+        return f"Enum Range Item {self.description}"
 
 
 class DataEnum(BaseDataElt):
@@ -186,7 +198,8 @@ class DataEnum(BaseDataElt):
         return max
 
     def get(self, val=None, description=None):
-        if val:
+        self.logger.debug(f"Get enum item for value {val} and/or description {description}")
+        if val is not None:
             if item := self.items.get(val):
                 return item
             for r in self.range_items:
@@ -206,25 +219,30 @@ class DataEnum(BaseDataElt):
         # Find value description
         item = self.get(int(raw))
         self.logger.debug(f"Found item {item} for value {raw}")
+        if isinstance(item, DataEnumItem):
+            value = item.description.replace(" ", "_").lower()
+        else:
+            value = raw
         return {
             self.shortcut: {
-                'description': self.description,
+                'description': item.description if item else "",
                 'unit': self.unit,
-                'value': item.value if item else raw,
+                'value': value,
                 'raw_value': raw,
             }
         }
 
-    def set_value(self, data, bitarray):
-        if isinstance(data, int):
-            item = self.get(data)
-            value = data
+    def set_value(self, val, bitarray):
+        if isinstance(val, int):
+            item = self.get(val)
+            value = val
         else:
-            item = self.get(description=data)
+            item = self.get(description=val)
             value = item.value
         if not item:
-            raise ValueError(f"Unable to find enum for {data}")
-        return self._set_raw(value, bitarray)
+            raise ValueError(f"Unable to find enum for {val}")
+        self.logger.debug(f"Set value to {value}")
+        return self._set_raw(int(value), bitarray)
 
 
     def __str__(self) -> str:
@@ -237,12 +255,17 @@ class DataEnum(BaseDataElt):
 class ProfileCommand(DataEnum):
     """ Used to define available commands"""
 
+    def __str__(self) -> str:
+        return f"Command enum: {self.description}"
+
 
 class ProfileData:
     """"""
+    logger = logging.getLogger('enocean.protocol.eep.profile')
     def __init__(self, elt):
         self.command = int(elt.get("command")) if elt.get("command") else None
         self.direction = int(elt.get("direction")) if elt.get("direction") else None
+        self.bits = int(elt.get("bits")) if elt.get("bits") else 1
         self.items = list()
 
         for e in elt.iter():
@@ -254,20 +277,22 @@ class ProfileData:
                 self.items.append(DataEnum(e))
 
     def __str__(self):
-        return f"Profile data command {self.command} and direction {self.direction} with {len(self.items)} items"
+        return f"Profile data with {len(self.items)} items | command:{self.command} direction:{self.direction} "
 
     def get(self, shortcut=None):
         """
         return: BaseDataElt
         """
+        self.logger.debug(f"Get profile data for shortcut {shortcut}")
         for item in self.items:
             if item.shortcut == shortcut:
                 return item
 
 
 class Profile:
+    logger = logging.getLogger('enocean.protocol.eep.profile')
 
-    def __init__(self, elt, rorg=None, func=None):
+    def __init__(self, elt, rorg=None, func=None, direction=None, command=None):
         self.rorg = rorg
         self.func = func
         self.type = elt.get("type")
@@ -282,12 +307,27 @@ class Profile:
                         f" commands: {len(self.commands)} data {len(elt.findall("data"))}")
         else:
             self.commands = None
+        # Dict of multiple supported datas profile depending on direction or command
         self.datas = dict()
         for p in elt.findall("data"):
             profile_data = ProfileData(p)
             profile_key = (profile_data.command, profile_data.direction)
             self.datas[profile_key] = profile_data
         # self.datas = [ProfileData(p) for p in elt.findall("data")]
+        self.command_item = None
+        self.command_data = None
+
+    @property
+    def items(self):
+        return self.command_data.items
+
+    @property
+    def bits(self):
+        return self.command_data.bits
+
+    # def __getattr__(self, item):
+    #     return getattr(self.command_data, item)
+
 
     @property
     def code(self):
@@ -299,24 +339,40 @@ class Profile:
             txt += f" with {len(self.commands)} commands"
         return txt
 
+    def set_command(self, command_id=None, direction=None):
+        try:
+            self.command_item = self.commands.get(val=command_id)
+        except AttributeError:
+            self.logger.debug(f"No command support for {self}")
+        self.command_data = self.datas.get((command_id, direction))
+
     def get(self, command=None, direction=None):
-        # TODO: Confirm this limitation
         if command and direction:
-            Warning("Command and Direction are specified but only one at a time can be use")
+            # TODO: Confirm this limitation
+            self.logger.warning("Command and Direction are specified but only one at a time should be use")
         if command and not self.commands:
-            raise ValueError("A command is specified but not supported by profile")
+            self.logger.error("A command is specified but not supported by profile")
+            # raise ValueError("A command is specified but not supported by profile")
         elif self.commands and not command:
             # Do not raise Exception since it break tests, however this is an error anyway
             # raise ValueError("Command not specified but profile support multiple commands")
-            # TODO: Confirm that first command shoudl be retrieve if not specified
-            return self.datas.get((1, direction))
+            self.logger.warning("Command is not specified but the profile support multiples commands")
+            return self.datas.get((1, direction)) # TODO: Confirm that first command must be decoded if not specified
         # elif command:
         #     print("Command selected:", command, type(command))
         #
         # if direction:
         #     print("Direction selected:", direction, type(direction))
         #     print(self, self.datas)
-        return self.datas.get((command, direction))
+        # TODO: should respond self with direction, command set
+        c = copy.copy(self)
+        c.set_command(command_id=command, direction=direction)
+        try:
+            c.set_command(command_id=command, direction=direction)
+        except Exception:
+            self.logger.debug("Profile do not support datas")
+        # return self.datas.get((command, direction))
+        return c
 
 
 class Profiles:
@@ -335,12 +391,12 @@ class EEP(object):
         self.telegrams = {}
 
         try:
-            eep_path = Path(__file__).parent.absolute().joinpath('EEP.xml')
-            tree = ElementTree.parse(eep_path)
-            tree_root = tree.getroot()
-            self.__load_xml(tree_root)
-            # eep_path = Path(__file__).parent.absolute().joinpath('eep')
-            # self.__load_xml_files(eep_path)
+            # eep_path = Path(__file__).parent.absolute().joinpath('EEP.xml')
+            # tree = ElementTree.parse(eep_path)
+            # tree_root = tree.getroot()
+            # self.__load_xml(tree_root)
+            eep_path = Path(__file__).parent.absolute().joinpath('eep')
+            self.__load_xml_files(eep_path)
             self.init_ok = True
         except IOError:
             # Impossible to test with the current structure?
@@ -385,8 +441,16 @@ class EEP(object):
             else:
                 self.telegrams.update({rorg : {func : {type_ : Profile(profile)}}})
 
-
-
+    def get_command_id(self, bitarray, eep_rorg, rorg_func, rorg_type):
+        try:
+            profile = self.telegrams[eep_rorg][rorg_func][rorg_type]
+            if profile.commands:
+                command_id = profile.commands.parse_raw(bitarray)
+                # command_id = self.parse_raw(bitarray, profile.commands.offset, profile.commands.size)
+                return command_id
+        except Exception as e:
+            self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
+                                hex(rorg_type))
 
     def find_profile(self, bitarray, eep_rorg, rorg_func, rorg_type, direction=None, command=None):
         ''' Find profile and data description, matching RORG, FUNC and TYPE
@@ -406,10 +470,11 @@ class EEP(object):
 
     def get_values(self, profile, bitarray, status):
         ''' Get keys and values from bitarray '''
-        if not self.init_ok or profile is None:
-            return [], {}
         output = dict()
+        if not self.init_ok or profile is None:
+            return output
         for source in profile.items:
+            self.logger.debug(f"Parse element {source} for value {status}")
             output.update(source.parse(bitarray, status))
         return output
 
@@ -417,16 +482,27 @@ class EEP(object):
         ''' Update data based on data contained in properties
         profile: Profile
         '''
+        self.logger.debug(f"Set value profile {profile} data={data} status={status} properties={properties}")
+        self.logger.debug(f"Profile with selected command {profile.command_item} {profile.command_data}")
         if not self.init_ok or profile is None:
             return data, status
 
         for shortcut, value in properties.items():
-            # find the given property from EEP
-            target = profile.get(shortcut=shortcut)
-            if not target:
-                # TODO: Should we raise an error?
-                self.logger.warning('Cannot find data description for shortcut %s', shortcut)
-                continue
-            # update bit_data
-            data = target.set_value(value, status)
+            # # find the given property from EEP
+            # target = profile.get(shortcut=shortcut)
+            # if not target:
+            #     # TODO: Should we raise an error?
+            #     self.logger.warning('Cannot find data description for shortcut %s', shortcut)
+            #     continue
+            # # update bit_data
+            if shortcut == "CMD":
+                target = profile.commands
+            else:
+                target = profile.command_data.get(shortcut)
+                self.logger.debug(f"Get {target} for shortcut {shortcut}")
+            self.logger.debug(f"Set bitarray for target type {type(target)}")
+            if isinstance(target, DataStatus):
+                status = target.set_value(value, data)
+            else:
+                data = target.set_value(value, data)
         return data, status
