@@ -1,5 +1,4 @@
 # -*- encoding: utf-8 -*-
-from __future__ import print_function, unicode_literals, division, absolute_import
 
 from enocean.communicators import Communicator
 from enocean.protocol.packet import Packet

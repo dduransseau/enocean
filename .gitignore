@@ -17,3 +17,10 @@ dist
 pip-selfcheck.json
 
 .vscode/
+enocean/protocol/eep - Copie.py
+scripts/combine_eep.py
+scripts/split_eep.py
+scripts/display_eep.py
+scripts/display_eep_details.py
+packets_list.txt
+.idea/
