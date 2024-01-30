@@ -1,6 +1,5 @@
 # -*- encoding: utf-8 -*-
 import logging
-from collections import OrderedDict
 
 import enocean.utils
 from enocean.protocol import crc8
@@ -40,7 +39,7 @@ class Packet(object):
             self.optional = optional
 
         self.status = 0
-        self.parsed = OrderedDict({})
+        self.parsed = dict()
         self.repeater_count = 0
         self._profile = None
 
@@ -52,9 +51,6 @@ class Packet(object):
             [hex(o) for o in self.data],
             [hex(o) for o in self.optional],
             self.parsed)
-
-    def __unicode__(self):
-        return self.__str__()
 
     def __eq__(self, other):
         return self.packet_type == other.packet_type and self.rorg == other.rorg \
@@ -225,7 +221,7 @@ class Packet(object):
             packet.data.extend([0] * int(packet._profile.bits))
         packet.data.extend(sender)
         packet.data.extend([0])
-        Packet.logger.debug(f'PAcket data length {len(packet.data)}')
+        Packet.logger.debug(f'Packet data length {len(packet.data)}')
         # Always use sub-telegram 3, maximum dbm (as per spec, when sending),
         # and no security (security not supported as per EnOcean Serial Protocol).
         packet.optional = [3] + destination + [0xFF] + [0]
@@ -241,7 +237,7 @@ class Packet(object):
             if rorg == RORG.BS4:
                 packet.data[4] |= (1 << 3)
         packet.data[-1] = packet.status
-        Packet.logger.debug(f'PAcket data length {len(packet.data)} after set_eep')
+        Packet.logger.debug(f'Packet data length {len(packet.data)} after set_eep')
         # Parse the built packet, so it corresponds to the received packages
         # For example, stuff like RadioPacket.learn should be set.
         packet = Packet.parse_msg(packet.build())[2]

@@ -406,12 +406,14 @@ class EEP(object):
         self.telegrams = {}
 
         try:
+            self.logger.debug("Start loading EEP xml files")
             # eep_path = Path(__file__).parent.absolute().joinpath('EEP.xml')
             # tree = ElementTree.parse(eep_path)
             # tree_root = tree.getroot()
             # self.__load_xml(tree_root)
             eep_path = Path(__file__).parent.absolute().joinpath('eep')
             self.__load_xml_files(eep_path)
+            self.logger.debug("EEP loaded")
             self.init_ok = True
         except IOError:
             # Impossible to test with the current structure?
@@ -424,7 +426,7 @@ class EEP(object):
         self.telegrams = {
             enocean.utils.from_hex_string(telegram.attrib['rorg']): {
                 enocean.utils.from_hex_string(function.attrib['func']): {
-                    enocean.utils.from_hex_string(profile.attrib['type'], ): Profile(profile, telegram.attrib['rorg'], function.attrib['func'])
+                    enocean.utils.from_hex_string(profile.attrib['type'], ): Profile(profile, rorg=telegram.attrib['rorg'], func=function.attrib['func'])
                     for profile in function.findall('profile')
                 }
                 for function in telegram.findall('profiles')
@@ -441,8 +443,11 @@ class EEP(object):
             function = telegram.find("profiles")
             profile = function.find("profile")
 
-            rorg = enocean.utils.from_hex_string(telegram.attrib['rorg'])
-            func = enocean.utils.from_hex_string(function.attrib['func'])
+            rorg_hex = telegram.attrib['rorg']
+            func_hex = function.attrib['func']
+
+            rorg = enocean.utils.from_hex_string(rorg_hex)
+            func = enocean.utils.from_hex_string(func_hex)
             type_ = enocean.utils.from_hex_string(profile.attrib['type'])
 
             if rorg in self.telegrams:
@@ -450,11 +455,11 @@ class EEP(object):
                     if type_ in self.telegrams[rorg][func]:
                         continue # Should not occur
                     else:
-                        self.telegrams[rorg][func].update({type_: Profile(profile)})
+                        self.telegrams[rorg][func].update({type_: Profile(profile, rorg=rorg_hex, func=func_hex)})
                 else:
-                    self.telegrams[rorg].update({func : {type_ : Profile(profile)}})
+                    self.telegrams[rorg].update({func : {type_ : Profile(profile, rorg=rorg_hex, func=func_hex)}})
             else:
-                self.telegrams.update({rorg : {func : {type_ : Profile(profile)}}})
+                self.telegrams.update({rorg : {func : {type_ : Profile(profile, rorg=rorg_hex, func=func_hex)}}})
 
     def get_command_id(self, bitarray, eep_rorg, rorg_func, rorg_type):
         try:
