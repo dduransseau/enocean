@@ -105,7 +105,6 @@ class DataValue(BaseDataElt):
             self.shortcut: {
                 'description': self.description,
                 'unit': self.unit,
-                # TODO: Figure out this logic
                 'value': self.process_value(raw),
                 'raw_value': raw,
             }
@@ -132,6 +131,9 @@ class DataEnumItem(BaseDataElt):
     def __str__(self):
         return f"Enum Item {self.description}"
 
+    def parse(self, val):
+        return self.description.replace(" ", "_").lower()
+
 
 class DataEnumRangeItem(BaseDataElt):
 
@@ -156,6 +158,9 @@ class DataEnumRangeItem(BaseDataElt):
 
     def __str__(self):
         return f"Enum Range Item {self.description}"
+
+    def parse(self, val):
+        return self.description.replace(" ", "_").lower().format(value=val)
 
 
 class DataEnum(BaseDataElt):
@@ -218,10 +223,7 @@ class DataEnum(BaseDataElt):
         # Find value description
         item = self.get(int(raw))
         self.logger.debug(f"Found item {item} for value {raw}")
-        if isinstance(item, DataEnumItem):
-            value = item.description.replace(" ", "_").lower()
-        else:
-            value = raw
+        value = item.parse(raw)
         return {
             self.shortcut: {
                 'description': item.description if item else "",
@@ -301,14 +303,16 @@ class Profile:
         c = elt.find("command")
         if c is not None:
             self.commands = ProfileCommand(c)
-            if len(self.commands) > len(elt.findall("data")):
-                Warning(f"{self.rorg}-{self.func}-{self.type} Seems to have less command than possible value"
-                        f" commands: {len(self.commands)} data {len(elt.findall("data"))}")
+            # TODO: Confirm utility
+            # if len(self.commands) > len(elt.findall("data")):
+            #     Warning(f"{self.rorg}-{self.func}-{self.type} Seems to have less command than possible value")
+            #     self.logger.debug(f"commands: {len(self.commands)} data {len(elt.findall("data"))}")
         else:
             self.commands = None
         # Dict of multiple supported datas profile depending on direction or command
         self.datas = dict()
         for p in elt.findall("data"):
+            # List all suppoted Profile data based organized on key (command, direction) (None, None) is default
             profile_data = ProfileData(p)
             profile_key = (profile_data.command, profile_data.direction)
             self.datas[profile_key] = profile_data
@@ -372,6 +376,18 @@ class Profile:
             self.logger.debug("Profile do not support datas")
         # return self.datas.get((command, direction))
         return c
+
+    def get_item_shortcut(self, shortcut):
+        if self.commands and self.commands.shortcut == shortcut:
+            return self.commands
+        for data_elt in self.datas.values():
+            if data_elt.shortcut == shortcut:
+                return data_elt
+
+    def map_item_value(self, shortcut, value):
+        if item := self.get_item_shortcut(shortcut):
+            if val := item.get(val=value):
+                return val
 
 
 class Profiles:
@@ -473,8 +489,15 @@ class EEP(object):
         if not self.init_ok or profile is None:
             return output
         for source in profile.items:
-            self.logger.debug(f"Parse element {source} for value {status}")
-            output.update(source.parse(bitarray, status))
+            self.logger.debug(f"Parse element {source} for value data={bitarray} status={status}")
+            if source.shortcut == "CMD":
+                val = source.parse(bitarray, status)
+                self.logger.debug(f"Identify command description for item {val}")
+                val["CMD"]["value"] = profile.command_item.description
+                output.update(val)
+            else:
+                output.update(source.parse(bitarray, status))
+        self.logger.debug(f"get_values {output}")
         return output
 
     def set_values(self, profile, data, status, properties):

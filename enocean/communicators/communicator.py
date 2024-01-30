@@ -3,10 +3,7 @@ import logging
 import datetime
 
 import threading
-try:
-    import queue
-except ImportError:
-    import Queue as queue
+import queue
 from enocean.protocol.packet import Packet, UTETeachInPacket
 from enocean.protocol.constants import PACKET, PARSE_RESULT, RETURN_CODE
 

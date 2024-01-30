@@ -189,7 +189,7 @@ class Packet(object):
             # At least for now, only support PACKET.RADIO_ERP1.
             raise ValueError('Packet type not supported by this function.')
 
-        if rorg not in [RORG.RPS, RORG.BS1, RORG.BS4, RORG.VLD]:
+        if rorg not in [RORG.RPS, RORG.BS1, RORG.BS4, RORG.VLD, RORG.MSC]:
             # At least for now, only support these RORGS.
             raise ValueError('RORG not supported by this function.')
 
