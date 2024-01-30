@@ -24,3 +24,5 @@ scripts/display_eep.py
 scripts/display_eep_details.py
 packets_list.txt
 .idea/
+shortcut_list.json
+shortcut_list.txt
