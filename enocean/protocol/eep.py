@@ -368,7 +368,11 @@ class Profile:
         #     print("Direction selected:", direction, type(direction))
         #     print(self, self.datas)
         # TODO: should respond self with direction, command set
+        command_item = self.commands.get(val=command)
+        telegram_data = self.datas.get((command, direction))
         c = copy.copy(self)
+        m = Message(telegram_data, command=command_item, direction=direction)
+        print(m)
         c.set_command(command_id=command, direction=direction)
         try:
             c.set_command(command_id=command, direction=direction)
@@ -377,17 +381,34 @@ class Profile:
         # return self.datas.get((command, direction))
         return c
 
-    def get_item_shortcut(self, shortcut):
-        if self.commands and self.commands.shortcut == shortcut:
-            return self.commands
-        for data_elt in self.datas.values():
-            if data_elt.shortcut == shortcut:
-                return data_elt
+    def get_message_form(self, command=None, direction=None):
+        if command and direction:
+            # TODO: Confirm this limitation
+            self.logger.warning("Command and Direction are specified but only one at a time should be use")
+        if command and not self.commands:
+            self.logger.error("A command is specified but not supported by profile")
+            # raise ValueError("A command is specified but not supported by profile")
+        elif self.commands and not command:
+            # Do not raise Exception since it break tests, however this is an error anyway
+            # raise ValueError("Command not specified but profile support multiple commands")
+            self.logger.warning("Command is not specified but the profile support multiples commands")
+            return self.datas.get((1, direction)) # TODO: Confirm that first command must be decoded if not specified
 
-    def map_item_value(self, shortcut, value):
-        if item := self.get_item_shortcut(shortcut):
-            if val := item.get(val=value):
-                return val
+        command_item = self.commands.get(val=command)
+        telegram_data = self.datas.get((command, direction))
+        return Message(telegram_data, command=command_item, direction=direction)
+
+    # def get_item_shortcut(self, shortcut):
+    #     if self.commands and self.commands.shortcut == shortcut:
+    #         return self.commands
+    #     for data_elt in self.datas.values():
+    #         if data_elt.shortcut == shortcut:
+    #             return data_elt
+    #
+    # def map_item_value(self, shortcut, value):
+    #     if item := self.get_item_shortcut(shortcut):
+    #         if val := item.get(val=value):
+    #             return val
 
 
 class Profiles:
@@ -399,15 +420,15 @@ class Profiles:
 
 
 class Message:
+    logger = logging.getLogger('enocean.protocol.eep.message')
 
-    def __init__(self, profile, command=None, direction=None):
-        self.profile = profile
-        self.command_id = command
-        self._body = None
-        self.command_item = None
-        self.telegram_data = None
+    def __init__(self, telegram_data, command=None, direction=None):
+        self.telegram_data = telegram_data
+        self.command_item = command
+        self.direction = direction
 
-
+    def __str__(self):
+        return f"Message {self.telegram_data} with command {self.command_item}"
     @property
     def items(self):
         return self.telegram_data.items
@@ -416,20 +437,10 @@ class Message:
     def bits(self):
         return self.telegram_data.bits
 
-    def set_command(self, command_id=None, direction=None):
-        try:
-            self.command_item = self.profile.commands.get(val=command_id)
-        except AttributeError:
-            self.logger.debug(f"No command support for {self}")
-        self.telegram_data = self.datas.get((command_id, direction))
-
-    def set_body(self, command_id, direction):
-        self._body = self.profile.get(command=command_id, direction=direction)
-
     def get_values(self, bitarray, status):
         ''' Get keys and values from bitarray '''
         output = dict()
-        for source in self.profile.items:
+        for source in self.items:
             if source.shortcut == "CMD":
                 val = source.parse(bitarray, status)
                 self.logger.debug(f"Identify command description for item {val}")
@@ -444,15 +455,15 @@ class Message:
         ''' Update data based on data contained in properties
         profile: Profile
         '''
-        self.logger.debug(f"Set value profile {self.profile} data={data} status={status} properties={properties}")
+        self.logger.debug(f"Set value data={data} status={status} properties={properties}")
         # self.logger.debug(f"Profile with selected command {self.profile.command_item} {self.profile.command_data}")
 
         for shortcut, value in properties.items():
             # find the given property from EEP
             if shortcut == "CMD":
-                target = self.profile.commands
+                target = self.command_item
             else:
-                target = self.profile.command_data.get(shortcut)
+                target = self.telegram_data.get(shortcut)
                 self.logger.debug(f"Get {target} for shortcut {shortcut}")
             self.logger.debug(f"Set bitarray for target type {type(target)}")
             if isinstance(target, DataStatus):
@@ -525,16 +536,16 @@ class EEP(object):
             else:
                 self.telegrams.update({rorg : {func : {type_ : Profile(profile, rorg=rorg_hex, func=func_hex)}}})
 
-    def get_command_id(self, bitarray, eep_rorg, rorg_func, rorg_type):
-        try:
-            profile = self.telegrams[eep_rorg][rorg_func][rorg_type]
-            if profile.commands:
-                command_id = profile.commands.parse_raw(bitarray)
-                # command_id = self.parse_raw(bitarray, profile.commands.offset, profile.commands.size)
-                return command_id
-        except Exception as e:
-            self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
-                                hex(rorg_type))
+    # def get_command_id(self, bitarray, eep_rorg, rorg_func, rorg_type):
+    #     try:
+    #         profile = self.telegrams[eep_rorg][rorg_func][rorg_type]
+    #         if profile.commands:
+    #             command_id = profile.commands.parse_raw(bitarray)
+    #             # command_id = self.parse_raw(bitarray, profile.commands.offset, profile.commands.size)
+    #             return command_id
+    #     except Exception as e:
+    #         self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
+    #                             hex(rorg_type))
 
     def find_profile(self, eep_rorg, rorg_func, rorg_type, direction=None, command=None):
         ''' Find profile and data description, matching RORG, FUNC and TYPE

@@ -26,3 +26,4 @@ packets_list.txt
 .idea/
 shortcut_list.json
 shortcut_list.txt
+scripts/measure_read_xml.py

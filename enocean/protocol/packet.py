@@ -246,6 +246,7 @@ class Packet(object):
         # For example, stuff like RadioPacket.learn should be set.
         packet = Packet.parse_msg(packet.build())[2]
         packet.rorg = rorg
+        # TODO: confirm need of this
         packet.parse_eep(rorg_func, rorg_type, direction, command)
         return packet
 
@@ -278,6 +279,15 @@ class Packet(object):
             self.select_eep(rorg_func, rorg_type, direction, command)
         # parse data
         values = self.eep.get_values(self._profile, self._bit_data, self._bit_status)
+        self.logger.debug(f"Parsed data values {values}")
+        self.parsed.update(values)
+        return list(values)
+
+    def parse_message(self, message):
+        ''' Parse EEP based on FUNC and TYPE '''
+        # set EEP profile, if demanded
+        # parse data
+        values = message.get_values(self._bit_data, self._bit_status)
         self.logger.debug(f"Parsed data values {values}")
         self.parsed.update(values)
         return list(values)

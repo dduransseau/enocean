@@ -1,13 +1,15 @@
 # -*- encoding: utf-8 -*-
 import logging
 
-from enocean.protocol.eep import EEP
+# Quick fix to avoid to read eep file twice
+from enocean.protocol.packet import Packet
+# from enocean.protocol.eep import EEP
 
 
 class Equipment(object):
     ''' Representation of device/sensor as EnOcean use the term Equipement '''
 
-    eep = EEP()
+    eep = Packet.eep
     logger = logging.getLogger('enocean.protocol.packet')
 
     def __init__(self, address, rorg=None, func=None, type_=None, name=None) -> None:
@@ -31,3 +33,12 @@ class Equipment(object):
             return f"Device {self.name} address {self.address} eep {self.eep_code}"
         return f"Device {self.address} eep {self.eep_code}"
 
+    def get_command_id(self, packet):
+        '''interpret packet to retrieve command id from VLD packets'''
+        self.logger.debug(f"Get command id in packet : {packet.data} {packet._bit_data}")
+        command_id = self.profile.commands.parse_raw(packet._bit_data)
+        if command_id:
+            return command_id
+
+    def get_message_form(self, **kwargs):
+        return self.profile.get_message_form(**kwargs)
