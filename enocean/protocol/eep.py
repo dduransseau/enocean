@@ -393,8 +393,10 @@ class Profile:
             # raise ValueError("Command not specified but profile support multiple commands")
             self.logger.warning("Command is not specified but the profile support multiples commands")
             return self.datas.get((1, direction)) # TODO: Confirm that first command must be decoded if not specified
-
-        command_item = self.commands.get(val=command)
+        if self.commands and command:
+            command_item = self.commands.get(val=command)
+        else:
+            command_item = None
         telegram_data = self.datas.get((command, direction))
         return Message(telegram_data, command=command_item, direction=direction)
 
