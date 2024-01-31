@@ -35,10 +35,11 @@ class Equipment(object):
 
     def get_command_id(self, packet):
         '''interpret packet to retrieve command id from VLD packets'''
-        self.logger.debug(f"Get command id in packet : {packet.data} {packet._bit_data}")
-        command_id = self.profile.commands.parse_raw(packet._bit_data)
-        if command_id:
-            return command_id
+        if self.profile.commands:
+            self.logger.debug(f"Get command id in packet : {packet.data} {packet._bit_data}")
+            command_id = self.profile.commands.parse_raw(packet._bit_data)
+            if command_id:
+                return command_id
 
     def get_message_form(self, **kwargs):
         return self.profile.get_message_form(**kwargs)
