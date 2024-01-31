@@ -12,4 +12,5 @@ Based on work of [kipe](https://github.com/kipe/enocean) and [mak-gitdev](https:
 - Use one xml file per EEP
 - Added some EEP
 - Support >= 3.8 (remove OrderedDict, use f-string, use PEP 572)
+- Replaced os module by pathlib
 - Added descriptions to metrics

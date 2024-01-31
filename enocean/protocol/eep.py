@@ -398,6 +398,70 @@ class Profiles:
         self.profiles = [Profile(p) for p in elt.findall("profile")]
 
 
+class Message:
+
+    def __init__(self, profile, command=None, direction=None):
+        self.profile = profile
+        self.command_id = command
+        self._body = None
+        self.command_item = None
+        self.telegram_data = None
+
+
+    @property
+    def items(self):
+        return self.telegram_data.items
+
+    @property
+    def bits(self):
+        return self.telegram_data.bits
+
+    def set_command(self, command_id=None, direction=None):
+        try:
+            self.command_item = self.profile.commands.get(val=command_id)
+        except AttributeError:
+            self.logger.debug(f"No command support for {self}")
+        self.telegram_data = self.datas.get((command_id, direction))
+
+    def set_body(self, command_id, direction):
+        self._body = self.profile.get(command=command_id, direction=direction)
+
+    def get_values(self, bitarray, status):
+        ''' Get keys and values from bitarray '''
+        output = dict()
+        for source in self.profile.items:
+            if source.shortcut == "CMD":
+                val = source.parse(bitarray, status)
+                self.logger.debug(f"Identify command description for item {val}")
+                val["CMD"]["value"] = self.command_item.description
+                output.update(val)
+            else:
+                output.update(source.parse(bitarray, status))
+        self.logger.debug(f"get_values {output}")
+        return output
+
+    def set_values(self, data, status, properties):
+        ''' Update data based on data contained in properties
+        profile: Profile
+        '''
+        self.logger.debug(f"Set value profile {self.profile} data={data} status={status} properties={properties}")
+        # self.logger.debug(f"Profile with selected command {self.profile.command_item} {self.profile.command_data}")
+
+        for shortcut, value in properties.items():
+            # find the given property from EEP
+            if shortcut == "CMD":
+                target = self.profile.commands
+            else:
+                target = self.profile.command_data.get(shortcut)
+                self.logger.debug(f"Get {target} for shortcut {shortcut}")
+            self.logger.debug(f"Set bitarray for target type {type(target)}")
+            if isinstance(target, DataStatus):
+                status = target.set_value(value, data)
+            else:
+                data = target.set_value(value, data)
+        return data, status
+
+
 class EEP(object):
     logger = logging.getLogger('enocean.protocol.eep')
 
@@ -472,7 +536,7 @@ class EEP(object):
             self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
                                 hex(rorg_type))
 
-    def find_profile(self, bitarray, eep_rorg, rorg_func, rorg_type, direction=None, command=None):
+    def find_profile(self, eep_rorg, rorg_func, rorg_type, direction=None, command=None):
         ''' Find profile and data description, matching RORG, FUNC and TYPE
 
         return: ProfileData
@@ -487,6 +551,16 @@ class EEP(object):
                                 hex(rorg_type))
             return None
         return profile.get(direction=direction, command=command)
+
+    def get_eep(self, eep_rorg, rorg_func, rorg_type):
+        if not self.init_ok:
+            self.logger.warning('EEP.xml not loaded!')
+            return None
+        try:
+            return self.telegrams[eep_rorg][rorg_func][rorg_type]
+        except Exception as e:
+            self.logger.warning('Cannot find rorg %s func %s type %s in EEP!', hex(eep_rorg), hex(rorg_func),
+                                hex(rorg_type))
 
     def get_values(self, profile, bitarray, status):
         ''' Get keys and values from bitarray '''
