@@ -27,3 +27,5 @@ packets_list.txt
 shortcut_list.json
 shortcut_list.txt
 scripts/measure_read_xml.py
+description.json
+scripts/display_description.py

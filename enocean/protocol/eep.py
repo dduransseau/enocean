@@ -41,6 +41,18 @@ class BaseDataElt:
             bitarray[self.offset+digit] = (raw_value >> (size-digit-1)) & 0x01 != 0
         return bitarray
 
+    def to_dict(self):
+        d = dict(description=self.description)
+        if self.shortcut:
+            d["shortcut"] = self.shortcut
+        if self.offset:
+            d["offset"] = self.offset
+        if self.size:
+            d["size"] = self.size
+        if self.unit:
+            d["unit"] = self.unit
+        return d
+
 
 class DataStatus(BaseDataElt):
     """ Status element
@@ -66,6 +78,11 @@ class DataStatus(BaseDataElt):
         ''' set given value to target bit in bitarray '''
         bitarray[self.offset] = data
         return bitarray
+
+    def to_dict(self):
+        d = dict(description=self.description)
+        d["type"] = "status"
+        return d
 
 class DataValue(BaseDataElt):
     """
@@ -121,6 +138,15 @@ class DataValue(BaseDataElt):
     def __str__(self) -> str:
         return f"Data value for {self.description}"
 
+    def to_dict(self):
+        d = super().to_dict()
+        d["type"] = "value"
+        if self.range_min is not None and self.range_max  is not None:
+            d["range"] = dict(min=self.range_min, max=self.range_max)
+        if self.scale_min is not None and self.scale_max is not None:
+            d["scale"] = dict(min=self.scale_min, max=self.scale_max)
+        return d
+
 
 class DataEnumItem(BaseDataElt):
 
@@ -133,6 +159,13 @@ class DataEnumItem(BaseDataElt):
 
     def parse(self, val):
         return self.description.replace(" ", "_").lower()
+
+    def to_dict(self):
+        d = super().to_dict()
+        d["type"] = "item"
+        if self.value:
+            d["value"] = self.value
+        return d
 
 
 class DataEnumRangeItem(BaseDataElt):
@@ -158,6 +191,15 @@ class DataEnumRangeItem(BaseDataElt):
 
     def __str__(self):
         return f"Enum Range Item {self.description}"
+
+    def to_dict(self):
+        d = super().to_dict()
+        d["type"] = "rangeitem"
+        if self.start is not None:
+            d["start"] = self.start
+        if self.end is not None:
+            d["end"] = self.end
+        return d
 
     def parse(self, val):
         return self.description.replace(" ", "_").lower().format(value=val)
@@ -245,6 +287,11 @@ class DataEnum(BaseDataElt):
         self.logger.debug(f"Set value to {value}")
         return self._set_raw(int(value), bitarray)
 
+    def to_dict(self):
+        d = super().to_dict()
+        d["type"] = "enum"
+        d["items"] = [i.to_dict() for i in self.items.values()] + [i.to_dict() for i in self.range_items]
+        return d
 
     def __str__(self) -> str:
         return f"Data enum for {self.description} from {self.first} to {self.last}"
@@ -279,6 +326,17 @@ class ProfileData:
 
     def __str__(self):
         return f"Profile data with {len(self.items)} items | command:{self.command} direction:{self.direction} "
+
+    def to_dict(self):
+        d = dict()
+        if self.command:
+            d["command"] = self.command
+        if self.direction:
+            d["direction"] = self.direction
+        if self.bits:
+            d["bits"] = self.bits
+        d["values"] = [i.to_dict() for i in self.items]
+        return d
 
     def get(self, shortcut=None):
         """
@@ -317,20 +375,16 @@ class Profile:
             profile_key = (profile_data.command, profile_data.direction)
             self.datas[profile_key] = profile_data
         # self.datas = [ProfileData(p) for p in elt.findall("data")]
-        self.command_item = None
-        self.command_data = None
-
-    @property
-    def items(self):
-        return self.command_data.items
-
-    @property
-    def bits(self):
-        return self.command_data.bits
-
-    # def __getattr__(self, item):
-    #     return getattr(self.command_data, item)
-
+    #     self.command_item = None
+    #     self.command_data = None
+    #
+    # @property
+    # def items(self):
+    #     return self.command_data.items
+    #
+    # @property
+    # def bits(self):
+    #     return self.command_data.bits
 
     @property
     def code(self):
@@ -341,6 +395,14 @@ class Profile:
         if self.commands:
             txt += f" with {len(self.commands)} commands"
         return txt
+
+    def to_dict(self):
+        d = dict(data=list())
+        if self.commands:
+            d["commands"] = self.commands.to_dict()
+        for v in self.datas.values():
+            d["data"].append(v.to_dict())
+        return d
 
     def set_command(self, command_id=None, direction=None):
         try:
@@ -371,8 +433,7 @@ class Profile:
         command_item = self.commands.get(val=command)
         telegram_data = self.datas.get((command, direction))
         c = copy.copy(self)
-        m = Message(telegram_data, command=command_item, direction=direction)
-        print(m)
+        # m = Message(telegram_data, command=command_item, direction=direction)
         c.set_command(command_id=command, direction=direction)
         try:
             c.set_command(command_id=command, direction=direction)
@@ -431,6 +492,7 @@ class Message:
 
     def __str__(self):
         return f"Message {self.telegram_data} with command {self.command_item}"
+
     @property
     def items(self):
         return self.telegram_data.items
@@ -453,26 +515,25 @@ class Message:
         self.logger.debug(f"get_values {output}")
         return output
 
-    def set_values(self, data, status, properties):
+    def set_values(self, packet, values):
         ''' Update data based on data contained in properties
-        profile: Profile
+        profile: Profile packet._bit_data, packet._bit_status
         '''
-        self.logger.debug(f"Set value data={data} status={status} properties={properties}")
+        self.logger.debug(f"Set value for properties={values} to {self.telegram_data}")
         # self.logger.debug(f"Profile with selected command {self.profile.command_item} {self.profile.command_data}")
 
-        for shortcut, value in properties.items():
+        for shortcut, value in values.items():
             # find the given property from EEP
-            if shortcut == "CMD":
-                target = self.command_item
-            else:
-                target = self.telegram_data.get(shortcut)
-                self.logger.debug(f"Get {target} for shortcut {shortcut}")
+            # if shortcut == "CMD":
+            #     target = self.command_item
+            # else:
+            target = self.telegram_data.get(shortcut)
+            # self.logger.debug(f"Get {target} for shortcut {shortcut}")
             self.logger.debug(f"Set bitarray for target type {type(target)}")
             if isinstance(target, DataStatus):
-                status = target.set_value(value, data)
+                packet._bit_status = target.set_value(value, packet._bit_data)
             else:
-                data = target.set_value(value, data)
-        return data, status
+                packet._bit_data = target.set_value(value, packet._bit_data)
 
 
 class EEP(object):
