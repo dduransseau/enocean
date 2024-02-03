@@ -1,5 +1,5 @@
 # -*- encoding: utf-8 -*-
-
+import struct
 
 def get_bit(byte, bit):
     ''' Get bit value from byte '''
@@ -38,3 +38,8 @@ def from_hex_string(hex_string):
     if len(reval) == 1:
         return reval[0]
     return reval
+
+
+def split_bytes_be(num, byte_count):
+    '''Split number to byte_count big-endian bytes.'''
+    return struct.pack('>I', num)[-byte_count:]

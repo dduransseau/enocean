@@ -65,6 +65,11 @@ class RORG(IntEnum):
     SYS_EX = 0xC5
     SEC = 0x30
     SEC_ENCAPS = 0x31
+    SECD = 0x32
+    SEC_CDM = 0x33
+    SEC_MAN = 0x34
+    SEC_TI = 0x35
+    SIGNAL = 0xD0
     UTE = 0xD4
 
 
@@ -73,6 +78,28 @@ class PARSE_RESULT(IntEnum):
     OK = 0x00
     INCOMPLETE = 0x01
     CRC_MISMATCH = 0x03
+
+class RLC_ALGO(IntEnum):
+    NO_RLC = 0
+    RLC_16_IMPLICIT = 2
+    RLC_24_IMPLICIT = 4
+    RLC_24_EXPLICIT = 5
+    RLC_32_24_EXPLICIT = 6
+    RLC_32_32_EXPLICIT = 7
+
+
+class MAC_ALGO(IntEnum):
+    NO_MAC = 0
+    MAC_24_AES128 = 1
+    MAC_32_AES128 = 2
+
+
+class DATA_ENC(IntEnum):
+    NO_ENC = 0
+    ENC_HSE = 1
+    ENC_NA = 2
+    ENC_VAES128 = 3
+    ENC_AESCBC = 4
 
 
 # Data byte indexing
