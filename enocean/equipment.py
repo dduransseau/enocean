@@ -21,6 +21,10 @@ class Equipment(object):
         self.profile = self.eep.get_eep(rorg, func, type_)
 
     @property
+    def eurid(self): # EnOcean Unique Radio Identifier
+        return self.address
+
+    @property
     def description(self):
         return self.profile.description
 

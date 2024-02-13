@@ -163,7 +163,7 @@ class DataEnumItem(BaseDataElt):
     def to_dict(self):
         d = super().to_dict()
         d["type"] = "item"
-        if self.value:
+        if self.value is not None: # 0 is allowed
             d["value"] = self.value
         return d
 
